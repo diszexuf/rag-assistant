@@ -64,7 +64,7 @@ docker compose exec backend python -m eval.run_generation --repeats 3
 
 ## Эмбеддинги bge-m3
 
-По умолчанию поиск работает на заглушке (хеши слов). Смысловой поиск — модель `BAAI/bge-m3` в контейнере `embeddings` (Text Embeddings Inference, CPU, ~3 ГБ памяти; модель ~2,3 ГБ скачивается при первом запуске):
+По умолчанию поиск работает на заглушке (хеши слов). Смысловой поиск — модель `BAAI/bge-m3` в контейнере `embeddings` (Text Embeddings Inference, CPU, ~3 ГБ памяти; модель ~2,3 ГБ скачивается при первом запуске, загрузка занимает несколько минут):
 
 ```bash
 docker compose up -d embeddings
@@ -78,7 +78,9 @@ docker compose exec backend python -m seed.seed --reset
 docker compose exec backend python -m eval.run_search
 ```
 
-Рекомендуемое значение порога из вывода `eval.run_search` впишите в `SEARCH_MAX_DISTANCE`.
+Рекомендуемое значение порога из вывода `eval.run_search` впишите в `SEARCH_MAX_DISTANCE` (на учебных данных подошло 0.35).
+
+Реранкер (`bge-reranker-v2-m3`, ещё ~2,5 ГБ памяти) включается так же: `docker compose up -d reranker`, в `.env` `RERANKER_PROVIDER=tei`. Он снижает число ложно найденных образцов; сравнение схем — в [docs/EVAL.md](docs/EVAL.md). Если оба контейнера не запускаются из-за памяти, увеличьте лимит памяти Docker Desktop.
 
 ## Тесты
 
