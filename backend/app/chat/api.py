@@ -12,6 +12,7 @@ from app.chat.models import Chat, GenerationRun, Message, ProgramVersion, User
 from app.db import get_session
 from app.kb.models import Machine, Program
 from app.kb.refs import MATERIALS, OP_TYPES
+from app.orchestrator.params import missing_value_issues
 from app.orchestrator.runs import RunManager, active_run
 
 router = APIRouter(prefix="/api")
@@ -273,6 +274,9 @@ async def save_version(
     """Ручная правка: сохраняется всегда, замечания валидатора только показываются."""
     program = await _get_program(program_id, user, session)
     report = nc.validate(body.text, program.dialect_code, program.machine.info())
+    operations = [(s["op_type"], s["description"]) for s in program.sources]
+    report.issues.extend(missing_value_issues(body.text, program.dialect_code, operations))
+    report.issues.sort(key=lambda issue: issue.line)
     version = ProgramVersion(
         program_id=program.id, text=body.text, author="user", report=report.to_dict()
     )

@@ -10,6 +10,7 @@ from app.kb.refs import MATERIALS, OP_TYPES
 from app.kb.search import OperationHit, SearchFilters
 from app.llm.base import ChatMessage, ChatModel
 from app.nc import ConversionResult, MachineInfo, ValidationReport
+from app.orchestrator.params import missing_value_issues
 
 PROMPTS_DIR = Path(__file__).parent / "prompts"
 _FENCE = re.compile(r"```[a-zA-Z]*\n(.*?)```", re.DOTALL)
@@ -74,6 +75,8 @@ class RunProgress:
     """Промежуточное состояние: позволяет сохранить черновик, если запуск оборвался."""
 
     sources: list[OperationSource] = field(default_factory=list)
+    # Пары (тип, описание) запроса: по ним проверяется наличие чисел в программе
+    operations: list[tuple[str, str]] = field(default_factory=list)
     program_text: str = ""
     explanation: str = ""
     report: ValidationReport | None = None
@@ -144,6 +147,7 @@ class Pipeline:
         progress: RunProgress | None = None,
     ) -> GenerationResult:
         progress = progress if progress is not None else RunProgress()
+        progress.operations = [(o.op_type, o.description) for o in operations]
 
         await on_stage("searching", 0)
         for index, operation in enumerate(operations, start=1):
@@ -156,7 +160,7 @@ class Pipeline:
         progress.program_text = program
 
         await on_stage("validating", 0)
-        report = self._validate(program, machine.dialect, machine.info)
+        report = self._check(machine, program, progress.operations)
         progress.report = report
 
         while report.errors and progress.attempts < self._max_fix_attempts:
@@ -167,7 +171,7 @@ class Pipeline:
                 break
             candidate, explanation = answer
             await on_stage("validating", progress.attempts)
-            candidate_report = self._validate(candidate, machine.dialect, machine.info)
+            candidate_report = self._check(machine, candidate, progress.operations)
             # Досрочная остановка: попытка не уменьшила число ошибок
             if len(candidate_report.errors) >= len(report.errors):
                 break
@@ -183,6 +187,15 @@ class Pipeline:
             sources=progress.sources,
             attempts=progress.attempts,
         )
+
+    def _check(
+        self, machine: MachineContext, program: str, operations: list[tuple[str, str]]
+    ) -> ValidationReport:
+        """Отчёт валидатора плюс предупреждения о числах запроса, которых нет в программе."""
+        report = self._validate(program, machine.dialect, machine.info)
+        report.issues.extend(missing_value_issues(program, machine.dialect, operations))
+        report.issues.sort(key=lambda issue: issue.line)
+        return report
 
     async def _resolve_source(
         self,

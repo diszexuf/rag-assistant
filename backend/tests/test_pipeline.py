@@ -202,3 +202,12 @@ async def test_hash_embeddings_are_deterministic_and_reflect_word_overlap():
     cosine = lambda x, y: sum(p * q for p, q in zip(x, y))
     assert a == (await model.embed(["Подрезка торца заготовки резцом"]))[0]
     assert cosine(a, b) > 0.8 > 0.2 > cosine(a, c)
+
+
+async def test_missing_request_value_is_warning_and_does_not_start_fix_loop():
+    model = ScriptedChatModel([GOOD])  # в GOOD глубина Z-10, в запросе 30
+    operation = OperationRequest("drilling", "Сверление на глубину 30 мм резцом T0101")
+    result = await Pipeline(model, make_search({}), max_fix_attempts=3).run(MACHINE, "steel", [operation])
+    codes = [(i.code, i.severity) for i in result.report.issues]
+    assert codes == [("REQUEST_VALUE_MISSING", "warning")]
+    assert result.report.errors == [] and result.attempts == 0 and len(model.calls) == 1

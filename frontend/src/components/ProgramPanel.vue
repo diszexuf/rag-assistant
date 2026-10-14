@@ -62,7 +62,7 @@ watch(version, (v) => (text.value = v.text), { immediate: true })
     <NH3 style="margin: 0">Отчёт валидатора</NH3>
     <NAlert v-if="!issues.length" type="success" :show-icon="false">Замечаний нет.</NAlert>
     <NAlert v-for="(issue, index) in issues" :key="index" :type="issue.severity" :show-icon="false">
-      Строка {{ issue.line }}. {{ issue.message }}
+      <template v-if="issue.line">Строка {{ issue.line }}. </template>{{ issue.message }}
     </NAlert>
 
     <NH3 style="margin: 0">Источники по операциям</NH3>
