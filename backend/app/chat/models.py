@@ -6,7 +6,15 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.db import Base
 from app.kb.models import Machine
 
-ACTIVE_STAGES = ("queued", "searching", "converting", "generating", "validating", "fixing")
+ACTIVE_STAGES = (
+    "queued",
+    "searching",
+    "converting",
+    "generating",
+    "editing",
+    "validating",
+    "fixing",
+)
 FINAL_STAGES = ("done", "failed")
 
 
@@ -43,7 +51,8 @@ class Message(Base):
     text: Mapped[str] = mapped_column(Text, default="")
     # Для запроса пользователя: [{"type": "...", "description": "..."}]
     operations: Mapped[list] = mapped_column(JSON, default=list)
-    # Для ответа: УП, созданная этим запуском
+    # Для ответа: УП, созданная или изменённая этим запуском.
+    # Для запроса пользователя: УП, которую нужно изменить (режим правки); text — инструкция
     program_id: Mapped[int | None] = mapped_column(
         ForeignKey("programs.id", ondelete="SET NULL"), nullable=True
     )

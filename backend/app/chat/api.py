@@ -26,7 +26,10 @@ class OperationIn(BaseModel):
 
 
 class RequestIn(BaseModel):
-    operations: list[OperationIn] = Field(min_length=1, max_length=20)
+    # Новая программа: непустой список операций. Правка: base_program_id и инструкция и/или операции
+    operations: list[OperationIn] = Field(default_factory=list, max_length=20)
+    base_program_id: int | None = None
+    instruction: str = Field(default="", max_length=2000)
 
 
 class ChatIn(BaseModel):
@@ -192,8 +195,25 @@ async def create_request(
         raise HTTPException(422, f"Неизвестный тип операции: {unknown[0]}")
     if await active_run(session, chat.id):
         raise HTTPException(409, "В чате уже идёт генерация")
+    instruction = body.instruction.strip()
+    if body.base_program_id is None:
+        if not body.operations:
+            raise HTTPException(422, "Укажите хотя бы одну операцию")
+        instruction = ""
+    else:
+        program = await _get_program(body.base_program_id, user, session)
+        if program.chat_id != chat.id:
+            raise HTTPException(404, "Программа не найдена")
+        if len(instruction) < 3 and not body.operations:
+            raise HTTPException(422, "Опишите, что изменить, или добавьте операции")
     operations = [{"type": op.type, "description": op.description.strip()} for op in body.operations]
-    message = Message(chat_id=chat.id, role="user", operations=operations)
+    message = Message(
+        chat_id=chat.id,
+        role="user",
+        text=instruction,
+        operations=operations,
+        program_id=body.base_program_id,
+    )
     session.add(message)
     await session.flush()
     run = await runs.start(session, chat, message)

@@ -235,3 +235,78 @@ async def test_prompt_has_no_concrete_numeric_examples():
     # Конкретные числа из примеров модель переносит дословно
     for stale in ("Z-42", "X84", "X62", "Z-25 Q5000", "CYCLE83(5,0,1,-25"):
         assert stale not in prompt
+
+
+BASE_PROGRAM = "T0101\nG97 S800 M3\nG0 X50 Z2\nG1 Z-10 F0.2\nM30"
+EDITED = "Подачу изменил.\n\n```nc\nT0101\nG97 S800 M3\nG0 X50 Z2\nG1 Z-10 F0.3\nM30\n```"
+
+
+async def test_edit_sends_current_program_and_instruction():
+    model = ScriptedChatModel([EDITED])
+    stages = []
+
+    async def on_stage(stage, attempt):
+        stages.append(stage)
+
+    result = await Pipeline(model, make_search({}), max_fix_attempts=3).edit(
+        MACHINE, "steel", BASE_PROGRAM, "Подачу сделать 0.3 мм/об", [], on_stage
+    )
+    prompt = model.calls[0][-1].content
+    assert "ИНСТРУКЦИЯ ТЕХНОЛОГА" in prompt and "Подачу сделать 0.3 мм/об" in prompt
+    assert "G1 Z-10 F0.2" in prompt  # текущая программа
+    assert "НОВЫЕ ОПЕРАЦИИ" not in prompt
+    assert stages == ["editing", "validating"]
+    assert result.sources == [] and "F0.3" in result.program_text
+    # Число из инструкции есть в программе: предупреждений нет
+    assert result.report.issues == []
+
+
+async def test_edit_warns_when_instruction_value_is_missing():
+    model = ScriptedChatModel([EDITED])
+    result = await Pipeline(model, make_search({}), max_fix_attempts=3).edit(
+        MACHINE, "steel", BASE_PROGRAM, "Подачу сделать 0.5 мм/об", []
+    )
+    assert [i.code for i in result.report.issues] == ["REQUEST_VALUE_MISSING"]
+    assert "Инструкция" in result.report.issues[0].message
+
+
+async def test_edit_with_new_operations_searches_and_continues_numbering():
+    search = make_search({"drilling": hit("fanuc_turn", "G83 X0 Z-42 F0.1")})
+    model = ScriptedChatModel([GOOD])
+    stages = []
+
+    async def on_stage(stage, attempt):
+        stages.append(stage)
+
+    result = await Pipeline(model, search, max_fix_attempts=3).edit(
+        MACHINE, "steel", BASE_PROGRAM, "", [OPS[1]], on_stage, first_index=3
+    )
+    assert stages == ["searching", "editing", "validating"]
+    assert [s.index for s in result.sources] == [3] and result.sources[0].kind == "kb"
+    prompt = model.calls[0][-1].content
+    assert "НОВЫЕ ОПЕРАЦИИ" in prompt and "Операция 3:" in prompt and "G83 X0 Z-42 F0.1" in prompt
+
+
+async def test_edit_runs_fix_loop():
+    model = ScriptedChatModel([NO_END, GOOD])
+    result = await Pipeline(model, make_search({}), max_fix_attempts=3).edit(
+        MACHINE, "steel", BASE_PROGRAM, "Убрать конец программы", []
+    )
+    assert result.attempts == 1 and result.report.errors == []
+
+
+async def test_demo_model_in_edit_mode_returns_current_program():
+    result = await Pipeline(DemoChatModel(), make_search({}), max_fix_attempts=3).edit(
+        MACHINE, "steel", BASE_PROGRAM, "Поменять подачу", []
+    )
+    assert result.program_text == BASE_PROGRAM
+
+
+async def test_demo_model_in_edit_mode_inserts_new_operations_before_last_line():
+    search = make_search({"drilling": hit("fanuc_turn", "T1111\nG83 X0 Z-42 F0.1")})
+    result = await Pipeline(DemoChatModel(), search, max_fix_attempts=3).edit(
+        MACHINE, "steel", BASE_PROGRAM, "", [OPS[1]]
+    )
+    lines = result.program_text.splitlines()
+    assert lines[-1] == "M30" and "G83 X0 Z-42 F0.1" in lines
+    assert lines.index("G83 X0 Z-42 F0.1") < len(lines) - 1

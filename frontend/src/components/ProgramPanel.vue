@@ -1,11 +1,12 @@
 <script setup lang="ts">
-import { NAlert, NButton, NFlex, NH3, NInput, NSelect, NTag, NText } from 'naive-ui'
+import { NAlert, NButton, NCollapse, NCollapseItem, NFlex, NH3, NInput, NSelect, NTag, NText } from 'naive-ui'
 import { computed, ref, watch } from 'vue'
 
 import type { Program } from '../api'
+import { collapseDiff, diffLines } from '../diff'
 
 const props = defineProps<{ program: Program; opTypes: Record<string, string> }>()
-const emit = defineEmits<{ save: [text: string] }>()
+const emit = defineEmits<{ save: [text: string]; draft: [text: string] }>()
 
 const ORIGINS = {
   kb: { title: 'На основе базы знаний', type: 'success' },
@@ -13,19 +14,30 @@ const ORIGINS = {
   unknown: { title: 'Есть операции без опоры на базу знаний', type: 'error' },
 } as const
 const KINDS = { kb: 'из базы знаний', converted: 'конвертирована', unknown: 'источника нет' }
+const AUTHORS = { system: 'генерация', user: 'ручная правка', edit: 'правка по запросу' }
 
 const versionId = ref(0)
 const text = ref('')
 
 const versions = computed(() => props.program.versions)
-const version = computed(() => versions.value.find((v) => v.id === versionId.value) ?? versions.value[0])
+const versionIndex = computed(() => {
+  const index = versions.value.findIndex((v) => v.id === versionId.value)
+  return index === -1 ? 0 : index
+})
+const version = computed(() => versions.value[versionIndex.value])
 const issues = computed(() => version.value.report.issues ?? [])
 const versionOptions = computed(() =>
   versions.value.map((v, index) => ({
     value: v.id,
-    label: `${index + 1} — ${v.author === 'user' ? 'ручная правка' : 'генерация'}, ошибок: ${v.report.error_count ?? 0}`,
+    label: `${index + 1} — ${AUTHORS[v.author]}, ошибок: ${v.report.error_count ?? 0}`,
   })),
 )
+// Изменения относительно предыдущей версии
+const diff = computed(() => {
+  if (versionIndex.value === 0) return []
+  return collapseDiff(diffLines(versions.value[versionIndex.value - 1].text, version.value.text))
+})
+const hasChanges = computed(() => diff.value.some((line) => line.kind !== 'same'))
 
 // При открытии программы и после сохранения показываем последнюю версию
 watch(
@@ -34,6 +46,8 @@ watch(
   { immediate: true },
 )
 watch(version, (v) => (text.value = v.text), { immediate: true })
+// Текст редактора нужен форме запроса: правка идёт по тому, что видит технолог
+watch(text, (value) => emit('draft', value), { immediate: true })
 </script>
 
 <template>
@@ -59,6 +73,17 @@ watch(version, (v) => (text.value = v.text), { immediate: true })
       Сохранить изменения
     </NButton>
 
+    <NCollapse v-if="versionIndex > 0">
+      <NCollapseItem title="Изменения относительно предыдущей версии" name="diff">
+        <NText v-if="!hasChanges" depth="3">Версии совпадают.</NText>
+        <pre v-else class="diff"><span
+          v-for="(line, index) in diff"
+          :key="index"
+          :class="`diff-line diff-${line.kind}`"
+        >{{ line.kind === 'add' ? '+ ' : line.kind === 'del' ? '- ' : '  ' }}{{ line.text }}</span></pre>
+      </NCollapseItem>
+    </NCollapse>
+
     <NH3 style="margin: 0">Отчёт валидатора</NH3>
     <NAlert v-if="!issues.length" type="success" :show-icon="false">Замечаний нет.</NAlert>
     <NAlert v-for="(issue, index) in issues" :key="index" :type="issue.severity" :show-icon="false">
@@ -76,3 +101,24 @@ watch(version, (v) => (text.value = v.text), { immediate: true })
     </div>
   </NFlex>
 </template>
+
+<style scoped>
+.diff {
+  margin: 0;
+  font-family: Consolas, monospace;
+  font-size: 13px;
+  white-space: pre-wrap;
+}
+.diff-line {
+  display: block;
+}
+.diff-add {
+  background: rgba(24, 160, 88, 0.18);
+}
+.diff-del {
+  background: rgba(208, 48, 80, 0.18);
+}
+.diff-same {
+  opacity: 0.7;
+}
+</style>

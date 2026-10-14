@@ -1,5 +1,5 @@
 import re
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal
@@ -77,6 +77,10 @@ class RunProgress:
     sources: list[OperationSource] = field(default_factory=list)
     # Пары (тип, описание) запроса: по ним проверяется наличие чисел в программе
     operations: list[tuple[str, str]] = field(default_factory=list)
+    # Номер первой операции запроса в общей нумерации программы (при правке нумерация продолжается)
+    first_index: int = 1
+    # Для правки: программа, версией которой будет результат
+    base_program_id: int | None = None
     program_text: str = ""
     explanation: str = ""
     report: ValidationReport | None = None
@@ -93,8 +97,12 @@ class GenerationResult:
     attempts: int
 
 
+def worst_kind(kinds: Iterable[str]) -> SourceKind:
+    return max(kinds, key=_ORIGIN_RANK.__getitem__, default="unknown")  # type: ignore[return-value]
+
+
 def worst_origin(sources: list[OperationSource]) -> SourceKind:
-    return max((s.kind for s in sources), key=_ORIGIN_RANK.__getitem__, default="unknown")
+    return worst_kind(s.kind for s in sources)
 
 
 def extract_program(response: str) -> tuple[str, str] | None:
@@ -161,8 +169,46 @@ class Pipeline:
         program, progress.explanation = await self._ask_program(prompt, machine.dialect, required=True)
         progress.program_text = program
 
+        return await self._validate_and_fix(machine, program, progress, on_stage)
+
+    async def edit(
+        self,
+        machine: MachineContext,
+        material: str,
+        base_program: str,
+        instruction: str,
+        operations: list[OperationRequest],
+        on_stage: StageFn = _no_stage,
+        progress: RunProgress | None = None,
+        first_index: int = 1,
+    ) -> GenerationResult:
+        """Правка существующей программы по инструкции; новые операции получают источники."""
+        progress = progress if progress is not None else RunProgress()
+        progress.first_index = first_index
+        progress.operations = [(o.op_type, o.description) for o in operations]
+        if instruction.strip():
+            # Пустой тип — свободная инструкция: из неё проверяются только общие значения
+            progress.operations.append(("", instruction))
+
+        if operations:
+            await on_stage("searching", 0)
+            for offset, operation in enumerate(operations):
+                source = await self._resolve_source(
+                    first_index + offset, operation, machine, material, on_stage
+                )
+                progress.sources.append(source)
+
+        await on_stage("editing", 0)
+        prompt = self._edit_prompt(machine, material, base_program, instruction, progress.sources)
+        program, progress.explanation = await self._ask_program(prompt, machine.dialect, required=True)
+        progress.program_text = program
+        return await self._validate_and_fix(machine, program, progress, on_stage)
+
+    async def _validate_and_fix(
+        self, machine: MachineContext, program: str, progress: RunProgress, on_stage: StageFn
+    ) -> GenerationResult:
         await on_stage("validating", 0)
-        report = self._check(machine, program, progress.operations)
+        report = self._check(machine, program, progress)
         progress.report = report
 
         while report.errors and progress.attempts < self._max_fix_attempts:
@@ -173,7 +219,7 @@ class Pipeline:
                 break
             candidate, explanation = answer
             await on_stage("validating", progress.attempts)
-            candidate_report = self._check(machine, candidate, progress.operations)
+            candidate_report = self._check(machine, candidate, progress)
             # Досрочная остановка: попытка не уменьшила число ошибок
             if len(candidate_report.errors) >= len(report.errors):
                 break
@@ -191,11 +237,15 @@ class Pipeline:
         )
 
     def _check(
-        self, machine: MachineContext, program: str, operations: list[tuple[str, str]]
+        self, machine: MachineContext, program: str, progress: RunProgress
     ) -> ValidationReport:
         """Отчёт валидатора плюс предупреждения о числах запроса, которых нет в программе."""
         report = self._validate(program, machine.dialect, machine.info)
-        report.issues.extend(missing_value_issues(program, machine.dialect, operations))
+        report.issues.extend(
+            missing_value_issues(
+                program, machine.dialect, progress.operations, first_index=progress.first_index
+            )
+        )
         report.issues.sort(key=lambda issue: issue.line)
         return report
 
@@ -267,6 +317,32 @@ class Pipeline:
             operations="\n\n".join(_operation_block(s, machine.dialect) for s in sources),
         )
 
+    def _edit_prompt(
+        self,
+        machine: MachineContext,
+        material: str,
+        program: str,
+        instruction: str,
+        sources: list[OperationSource],
+    ) -> str:
+        new_operations = ""
+        if sources:
+            blocks = "\n\n".join(_operation_block(s, machine.dialect) for s in sources)
+            new_operations = (
+                "НОВЫЕ ОПЕРАЦИИ (добавь их перед концом программы, если в инструкции не сказано иначе)"
+                f"\n\n{blocks}"
+            )
+        return _render(
+            "edit.md",
+            **_machine_fields(machine),
+            material=MATERIALS.get(material, material),
+            machine_notes=machine.notes or "нет",
+            cutting_modes=_cutting_modes(material, sources),
+            program=program,
+            instruction=instruction.strip() or "нет, только добавить новые операции",
+            new_operations=new_operations,
+        )
+
     def _fix_prompt(self, machine: MachineContext, program: str, report: ValidationReport) -> str:
         lines = [f"- строка {i.line}: {i.message}" for i in report.errors]
         return _render(
@@ -313,12 +389,14 @@ def _operation_block(source: OperationSource, dialect: str) -> str:
 def _cutting_modes(material: str, sources: list[OperationSource]) -> str:
     """Режимы резания для материала — только для типов операций из запроса."""
     modes = CUTTING_MODES.get(material, {})
+    # Правка без новых операций: даём режимы для всех типов, инструкция может касаться любого
+    op_types = [s.op_type for s in sources] or list(OP_TYPES)
     lines, seen = [], set()
-    for source in sources:
-        if source.op_type in seen or source.op_type not in modes:
+    for op_type in op_types:
+        if op_type in seen or op_type not in modes:
             continue
-        seen.add(source.op_type)
-        lines.append(f"- {OP_TYPES.get(source.op_type, source.op_type)}: {modes[source.op_type]}")
+        seen.add(op_type)
+        lines.append(f"- {OP_TYPES.get(op_type, op_type)}: {modes[op_type]}")
     return "\n".join(lines) or "- нет данных"
 
 

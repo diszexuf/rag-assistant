@@ -39,7 +39,15 @@ class DemoChatModel:
         # Последний блок в шаблонах — образец формата ответа, а не источник
         fragments = [f for f in fragments if f.strip() != "текст программы"]
 
-        if "ОТЧЁТ ВАЛИДАТОРА" in prompt:
+        if "ИНСТРУКЦИЯ ТЕХНОЛОГА" in prompt:
+            # Режим правки: первый блок — текущая программа, остальные — образцы новых операций
+            current, new = (fragments[0] if fragments else ""), fragments[1:]
+            note = "; операция без источника" if semicolon else "(операция без источника)"
+            lines = current.splitlines()
+            added = [f or note for f in new]
+            program = "\n".join(lines[:-1] + added + lines[-1:]) if added else current
+            explanation = "Заглушка: инструкция не применена, добавлены фрагменты новых операций."
+        elif "ОТЧЁТ ВАЛИДАТОРА" in prompt:
             program = fragments[-1] if fragments else ""
             explanation = "Заглушка: добавлен конец программы."
         else:

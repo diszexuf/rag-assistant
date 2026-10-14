@@ -13,6 +13,7 @@ const STAGES: Record<string, string> = {
   searching: 'Поиск похожих операций',
   converting: 'Конвертация из другого диалекта',
   generating: 'Модель составляет программу',
+  editing: 'Модель вносит изменения',
   validating: 'Проверка валидатором',
   fixing: 'Модель исправляет ошибки',
 }
@@ -81,6 +82,7 @@ function createChat() {
 
       <NCard v-for="m in store.chat.messages" :key="m.id" size="small" :embedded="m.role === 'user'">
         <template v-if="m.role === 'user'">
+          <div v-if="m.program_id"><b>Правка программы:</b> {{ m.text || 'добавить операции' }}</div>
           <div v-for="(op, index) in m.operations" :key="index">
             {{ index + 1 }}. <b>{{ store.refs.op_types[op.type] ?? op.type }}.</b> {{ op.description }}
           </div>
@@ -105,7 +107,12 @@ function createChat() {
         {{ store.run.error }}
       </NAlert>
 
-      <RequestForm :op-types="store.refs.op_types" :disabled="running" @submit="store.sendRequest" />
+      <RequestForm
+        :op-types="store.refs.op_types"
+        :disabled="running"
+        :editable-program-id="store.program?.id ?? null"
+        @submit="store.sendRequest"
+      />
     </NFlex>
     <NEmpty v-else class="column" description="Выберите станок и материал и начните новый чат" />
 
@@ -115,6 +122,7 @@ function createChat() {
       :program="store.program"
       :op-types="store.refs.op_types"
       @save="store.saveProgram"
+      @draft="store.draft = $event"
     />
     <NEmpty v-else class="column" description="Здесь появится программа" />
 

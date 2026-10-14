@@ -17,6 +17,7 @@ from app.orchestrator.pipeline import (
     OperationRequest,
     Pipeline,
     RunProgress,
+    worst_kind,
     worst_origin,
 )
 
@@ -166,7 +167,22 @@ class RunManager:
             pipeline = Pipeline(
                 self._chat_model(), search, max_fix_attempts=self._max_fix_attempts
             )
-            await pipeline.run(context, material, operations, on_stage, progress)
+            base = await session.get(Program, message.program_id) if message.program_id else None
+            if base is None:
+                await pipeline.run(context, material, operations, on_stage, progress)
+            else:
+                # Правка: берётся актуальный текст программы, включая ручные правки технолога
+                progress.base_program_id = base.id
+                await pipeline.edit(
+                    context,
+                    material,
+                    base.text,
+                    message.text,
+                    operations,
+                    on_stage,
+                    progress,
+                    first_index=len(base.sources) + 1,
+                )
 
     async def _save_result(self, run_id: int, progress: RunProgress, failed: bool) -> int | None:
         """Сохраняет УП и ответ в чат. При сбое сохраняется черновик, если он успел появиться."""
@@ -178,6 +194,9 @@ class RunManager:
             machine = await session.get(Machine, chat.machine_id)
             request = await session.get(Message, run.message_id)
             report = progress.report.to_dict() if progress.report else {}
+            note = "Черновик: генерация прервана. " if failed else ""
+            if progress.base_program_id is not None:
+                return await self._save_edit(session, chat, progress, report, note)
             program = Program(
                 title=_title(request.operations),
                 text=progress.program_text,
@@ -196,7 +215,6 @@ class RunManager:
                     program_id=program.id, text=program.text, author="system", report=report
                 )
             )
-            note = "Черновик: генерация прервана. " if failed else ""
             session.add(
                 Message(
                     chat_id=chat.id,
@@ -207,6 +225,30 @@ class RunManager:
             )
             await session.commit()
             return program.id
+
+    async def _save_edit(
+        self, session: AsyncSession, chat: Chat, progress: RunProgress, report: dict, note: str
+    ) -> int:
+        """Результат правки — новая версия той же программы, а не новая программа."""
+        program = await session.get(Program, progress.base_program_id)
+        program.text = progress.program_text
+        # Новый список: SQLAlchemy не отслеживает изменения JSON на месте
+        program.sources = list(program.sources) + [s.to_dict() for s in progress.sources]
+        if program.sources:
+            program.origin = worst_kind(s["kind"] for s in program.sources)
+        session.add(
+            ProgramVersion(program_id=program.id, text=program.text, author="edit", report=report)
+        )
+        session.add(
+            Message(
+                chat_id=chat.id,
+                role="assistant",
+                text=note + progress.explanation,
+                program_id=program.id,
+            )
+        )
+        await session.commit()
+        return program.id
 
 
 def _title(operations: list[dict]) -> str:

@@ -36,7 +36,14 @@ export interface Message {
   role: 'user' | 'assistant'
   text: string
   operations: OperationInput[]
+  // У запроса пользователя — программа, которую нужно изменить (режим правки)
   program_id: number | null
+}
+
+export interface RequestBody {
+  operations: OperationInput[]
+  base_program_id?: number
+  instruction?: string
 }
 
 export interface RunState {
@@ -65,7 +72,7 @@ export interface Issue {
 
 export interface Version {
   id: number
-  author: 'system' | 'user'
+  author: 'system' | 'user' | 'edit'
   text: string
   report: { issues?: Issue[]; error_count?: number }
   created_at: string
@@ -114,8 +121,8 @@ export const api = {
   createChat: (machine_id: number, material: string) =>
     request<ChatSummary>('/chats', post({ machine_id, material })),
   deleteChat: (id: number) => request<void>(`/chats/${id}`, { method: 'DELETE' }),
-  sendRequest: (chatId: number, operations: OperationInput[]) =>
-    request<RunState>(`/chats/${chatId}/requests`, post({ operations })),
+  sendRequest: (chatId: number, body: RequestBody) =>
+    request<RunState>(`/chats/${chatId}/requests`, post(body)),
   program: (id: number) => request<Program>(`/programs/${id}`),
   saveVersion: (programId: number, text: string) =>
     request<Version>(`/programs/${programId}/versions`, post({ text })),

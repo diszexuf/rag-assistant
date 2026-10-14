@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 
-import { api, type Chat, type ChatSummary, type OperationInput, type Program, type Refs, type RunState } from './api'
+import { api, type Chat, type ChatSummary, type Program, type Refs, type RequestBody, type RunState } from './api'
 
 // Клиентский таймаут должен быть больше серверного RUN_TIMEOUT_S
 const RUN_TIMEOUT_S = Number(import.meta.env.VITE_RUN_TIMEOUT_S ?? 300)
@@ -12,6 +12,8 @@ export const useStore = defineStore('main', () => {
   const chat = ref<Chat | null>(null)
   const program = ref<Program | null>(null)
   const run = ref<RunState | null>(null)
+  // Текст в редакторе программы, включая несохранённые правки
+  const draft = ref('')
   const elapsed = ref(0)
   const error = ref('')
 
@@ -81,11 +83,19 @@ export const useStore = defineStore('main', () => {
     })
   }
 
-  async function sendRequest(operations: OperationInput[]) {
+  async function sendRequest(body: RequestBody) {
     const chatId = chat.value?.id
     if (!chatId) return
     await guard(async () => {
-      const state = await api.sendRequest(chatId, operations)
+      // Правка идёт по тому, что видит технолог: несохранённые изменения сохраняются версией
+      const current = program.value
+      if (body.base_program_id && current?.id === body.base_program_id) {
+        const last = current.versions[current.versions.length - 1]
+        if (draft.value && last && draft.value !== last.text) {
+          await api.saveVersion(current.id, draft.value)
+        }
+      }
+      const state = await api.sendRequest(chatId, body)
       chat.value = await api.chat(chatId)
       watchRun(state)
     })
@@ -132,7 +142,7 @@ export const useStore = defineStore('main', () => {
   }
 
   return {
-    refs, chats, chat, program, run, elapsed, error,
+    refs, chats, chat, program, run, draft, elapsed, error,
     init, openChat, createChat, deleteChat, openProgram, sendRequest, saveProgram,
   }
 })
