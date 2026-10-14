@@ -51,6 +51,10 @@ function createChat() {
       <NH2 style="margin: 0">Помощник технолога</NH2>
       <NSelect v-model:value="machineId" :options="machineOptions" placeholder="Станок" />
       <NSelect v-model:value="material" :options="materialOptions" placeholder="Материал" />
+      <NText depth="3">
+        Материал определяет режимы резания (скорость и подачу), если они не указаны в описании
+        операции, и приоритет примеров из базы знаний.
+      </NText>
       <NButton type="primary" @click="createChat">Начать новый чат</NButton>
       <NFlex v-for="c in store.chats" :key="c.id" :wrap="false" align="center">
         <NButton

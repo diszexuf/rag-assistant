@@ -6,7 +6,7 @@ from typing import Literal
 
 from app import nc
 from app.kb.ingest import embedding_text
-from app.kb.refs import MATERIALS, OP_TYPES
+from app.kb.refs import CUTTING_MODES, MATERIALS, OP_TYPES
 from app.kb.search import OperationHit, SearchFilters
 from app.llm.base import ChatMessage, ChatModel
 from app.nc import ConversionResult, MachineInfo, ValidationReport
@@ -137,6 +137,8 @@ class Pipeline:
         self._max_fix_attempts = max_fix_attempts
         self._convert = convert
         self._validate = validate
+        # В системном сообщении нет подстановок: рендерим один раз
+        self._system = _render("system.md")
 
     async def run(
         self,
@@ -242,7 +244,9 @@ class Pipeline:
     async def _ask_program(
         self, prompt: str, dialect: str, required: bool = False
     ) -> tuple[str, str] | None:
-        response = await self._chat.complete([ChatMessage("user", prompt)])
+        response = await self._chat.complete(
+            [ChatMessage("system", self._system), ChatMessage("user", prompt)]
+        )
         answer = extract_program(response)
         if answer:
             program = strip_comments(answer[0], dialect)
@@ -259,6 +263,7 @@ class Pipeline:
             **_machine_fields(machine),
             material=MATERIALS.get(material, material),
             machine_notes=machine.notes or "нет",
+            cutting_modes=_cutting_modes(material, sources),
             operations="\n\n".join(_operation_block(s, machine.dialect) for s in sources),
         )
 
@@ -303,6 +308,18 @@ def _operation_block(source: OperationSource, dialect: str) -> str:
     )
     # Пустой блок сохраняет позицию операции для демонстрационной заглушки
     return f"{head}\n```nc\n{source.fragment}\n```"
+
+
+def _cutting_modes(material: str, sources: list[OperationSource]) -> str:
+    """Режимы резания для материала — только для типов операций из запроса."""
+    modes = CUTTING_MODES.get(material, {})
+    lines, seen = [], set()
+    for source in sources:
+        if source.op_type in seen or source.op_type not in modes:
+            continue
+        seen.add(source.op_type)
+        lines.append(f"- {OP_TYPES.get(source.op_type, source.op_type)}: {modes[source.op_type]}")
+    return "\n".join(lines) or "- нет данных"
 
 
 def _machine_fields(machine: MachineContext) -> dict[str, str]:

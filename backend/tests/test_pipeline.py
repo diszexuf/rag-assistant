@@ -87,9 +87,9 @@ async def test_three_source_kinds_and_worst_origin():
     assert stages == ["searching", "converting", "generating", "validating"]
     # Материал снимается раньше диалекта
     assert [bool(f.material) for f in search.calls[:2]] == [True, False]
-    prompt = model.calls[0][0].content
+    prompt = model.calls[0][-1].content
     assert "Образец (из базы знаний)" in prompt and "Образец (конвертирован)" in prompt
-    assert "G83 X0 Z-25 Q5000" in prompt  # подсказка диалекта по типу операции
+    assert "G83 X0 Z-<глубина отверстия>" in prompt  # подсказка диалекта по типу операции
     assert "позиция 1" in prompt and "G71" in prompt
 
 
@@ -122,7 +122,7 @@ async def test_fix_loop_repairs_program():
     )
     assert result.attempts == 1 and result.report.errors == []
     assert ("fixing", 1) in stages
-    fix_prompt = model.calls[1][0].content
+    fix_prompt = model.calls[1][-1].content
     assert "ОТЧЁТ ВАЛИДАТОРА" in fix_prompt and "конца программы" in fix_prompt
 
 
@@ -211,3 +211,27 @@ async def test_missing_request_value_is_warning_and_does_not_start_fix_loop():
     codes = [(i.code, i.severity) for i in result.report.issues]
     assert codes == [("REQUEST_VALUE_MISSING", "warning")]
     assert result.report.errors == [] and result.attempts == 0 and len(model.calls) == 1
+
+
+async def test_system_message_and_cutting_modes_in_prompt():
+    model = ScriptedChatModel([GOOD])
+    ops = [OperationRequest("facing", "подрезка торца"), OperationRequest("drilling", "сверление")]
+    await Pipeline(model, make_search({}), max_fix_attempts=3).run(MACHINE, "aluminium", ops)
+    messages = model.calls[0]
+    assert [m.role for m in messages] == ["system", "user"]
+    assert "технолог-программист" in messages[0].content
+    prompt = messages[-1].content
+    assert "РЕЖИМЫ РЕЗАНИЯ ДЛЯ МАТЕРИАЛА «Алюминиевый сплав»" in prompt
+    # Только типы операций из запроса
+    assert "Подрезка торца: скорость резания 250–400" in prompt
+    assert "Сверление: скорость резания 60–90" in prompt
+    assert "Нарезание резьбы:" not in prompt
+
+
+async def test_prompt_has_no_concrete_numeric_examples():
+    model = ScriptedChatModel([GOOD])
+    await Pipeline(model, make_search({}), max_fix_attempts=3).run(MACHINE, "steel", [OPS[1]])
+    prompt = model.calls[0][-1].content
+    # Конкретные числа из примеров модель переносит дословно
+    for stale in ("Z-42", "X84", "X62", "Z-25 Q5000", "CYCLE83(5,0,1,-25"):
+        assert stale not in prompt
