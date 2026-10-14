@@ -7,20 +7,25 @@
 - [docs/TESTING.md](docs/TESTING.md) — что вводить в поля, чтобы проверить работоспособность;
 - [docs/INTERNALS.md](docs/INTERNALS.md) — подробное описание важных блоков;
 - [docs/NOTES.md](docs/NOTES.md) — итоги прототипа;
-- [docs/PLAN.md](docs/PLAN.md) — план разработки;
-- [docs/IMPROVEMENT_PLAN.md](docs/IMPROVEMENT_PLAN.md) — план доработки генерации и RAG.
+- [docs/EVAL.md](docs/EVAL.md) — результаты оценки поиска и генерации;
+- [docs/PLAN.md](docs/PLAN.md) — исходный план разработки;
+- [docs/IMPROVEMENT_PLAN.md](docs/IMPROVEMENT_PLAN.md) — план доработки генерации и RAG (выполнен).
 
 ## Запуск
 
-Нужны Docker с Compose и Node.js.
+Нужны Docker с Compose и Node.js. Для минимального запуска (на заглушках, без сети и без загрузки моделей) достаточно команд ниже.
 
 ```bash
 cp .env.example .env
 ```
 
+Если `.env` уже есть от прежней версии, он продолжит работать: новые переменные (`EMBEDDINGS_URL`, `RERANKER_*`, `SEARCH_CANDIDATES` и др.) необязательны и имеют значения по умолчанию. Их описание — в `.env.example`.
+
 ```bash
 docker compose up -d --build
 ```
+
+Эта команда поднимает базу и бэкенд. Контейнеры моделей поиска (`embeddings`, `reranker`) в неё **не входят** и запускаются отдельно, см. раздел «Эмбеддинги bge-m3».
 
 ```bash
 docker compose exec backend alembic upgrade head
@@ -71,7 +76,9 @@ docker compose exec backend python -m eval.run_generation --repeats 3
 docker compose up -d embeddings
 ```
 
-В `.env`: `EMBEDDING_PROVIDER=tei`. Затем перезапустите бэкенд, перезагрузите базу знаний и подберите порог поиска:
+Первый запуск скачивает модель (несколько минут), готовность — когда `http://localhost:8081/health` отвечает 200. Контейнер входит в профиль `models`, поэтому обычный `docker compose up -d` его не запускает.
+
+В `.env`: `EMBEDDING_PROVIDER=tei`. Затем примените настройки (`docker compose up -d backend`: простой `restart` переменные из `.env` не перечитывает), перезагрузите базу знаний и подберите порог поиска:
 
 ```bash
 docker compose exec backend python -m app.llm.check_embeddings
@@ -81,7 +88,7 @@ docker compose exec backend python -m eval.run_search
 
 Рекомендуемое значение порога из вывода `eval.run_search` впишите в `SEARCH_MAX_DISTANCE` (на учебных данных подошло 0.35).
 
-Реранкер (`bge-reranker-v2-m3`, ещё ~2,5 ГБ памяти) включается так же: `docker compose up -d reranker`, в `.env` `RERANKER_PROVIDER=tei`. Он снижает число ложно найденных образцов; сравнение схем — в [docs/EVAL.md](docs/EVAL.md). Если оба контейнера не запускаются из-за памяти, увеличьте лимит памяти Docker Desktop.
+Реранкер (`bge-reranker-v2-m3`, ещё ~2,5 ГБ памяти) включается так же: `docker compose up -d reranker` (готовность — `http://localhost:8082/health`), в `.env` `RERANKER_PROVIDER=tei`, затем `docker compose up -d backend` (простой `restart` переменные из `.env` не перечитывает). Он снижает число ложно найденных образцов; сравнение схем — в [docs/EVAL.md](docs/EVAL.md). Если оба контейнера не запускаются из-за памяти, увеличьте лимит памяти Docker Desktop.
 
 ## Тесты
 

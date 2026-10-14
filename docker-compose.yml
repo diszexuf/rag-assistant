@@ -19,6 +19,8 @@ services:
   # в том hf_cache. Бэкенд обращается к сервису, только если EMBEDDING_PROVIDER=tei.
   embeddings:
     image: ghcr.io/huggingface/text-embeddings-inference:cpu-1.9
+    # Не запускается обычным `docker compose up`: только явно (docker compose up -d embeddings)
+    profiles: ["models"]
     # max-batch-tokens по умолчанию 16384: ONNX Runtime при прогреве занимает ~11 ГБ памяти.
     # Тексты у нас короткие, поэтому лимит снижен.
     command: --model-id BAAI/bge-m3 --max-batch-tokens 2048
@@ -30,6 +32,7 @@ services:
   # Реранкер BAAI/bge-reranker-v2-m3 (~2.3 ГБ). Нужен, только если RERANKER_PROVIDER=tei.
   reranker:
     image: ghcr.io/huggingface/text-embeddings-inference:cpu-1.9
+    profiles: ["models"]
     command: --model-id BAAI/bge-reranker-v2-m3 --max-batch-tokens 4096
     ports:
       - "8082:80"
