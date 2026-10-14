@@ -1,0 +1,45 @@
+# Запросы для оценки генерации (python -m eval.run_generation): примеры из docs/GUIDE.md, раздел 3.
+- id: example-1-all-from-kb
+  machine: Токарный станок с ЧПУ Fanuc 0i-TD
+  material: steel
+  operations:
+    - type: facing
+      description: Подрезка торца заготовки диаметром 60 мм проходным резцом T0101, скорость резания 120 м/мин, подача 0.15 мм/об
+    - type: drilling
+      description: Сверление центрального отверстия диаметром 20 мм на глубину 30 мм сверлом T1111, цикл глубокого сверления
+
+- id: example-2-other-dialect
+  machine: Токарный станок с ЧПУ Sinumerik 802D
+  material: steel
+  operations:
+    - type: facing
+      description: Подрезка торца заготовки диаметром 60 мм проходным резцом T1, скорость резания 110 м/мин, подача 0.15 мм/об
+    - type: threading
+      description: Нарезание наружной метрической резьбы М30х1.5 длиной 20 мм резьбовым резцом T3, 700 об/мин
+    - type: drilling
+      description: Сверление центрального отверстия диаметром 20 мм на глубину 25 мм сверлом T5, 400 об/мин
+
+- id: example-3-material-relaxed
+  machine: Токарный станок с ЧПУ Fanuc 0i-TD
+  material: aluminium
+  operations:
+    - type: facing
+      description: Подрезка торца алюминиевой заготовки диаметром 50 мм резцом T0101, скорость резания 250 м/мин
+
+- id: example-4-nothing-similar
+  machine: Токарный станок с ЧПУ Fanuc 0i-TD
+  material: steel
+  operations:
+    - type: turning
+      description: Проточить галтель радиусом 3 мм фасонным резцом T0202
+
+- id: example-5-three-operations
+  machine: Токарный станок с ЧПУ Fanuc 0i-TD
+  material: steel
+  operations:
+    - type: facing
+      description: Подрезка торца заготовки диаметром 70 мм резцом T0101, скорость резания 130 м/мин, подача 0.2 мм/об
+    - type: turning
+      description: Черновое точение вала циклом G71 с диаметра 68 до 40 мм на длине 60 мм, глубина резания 2.5 мм, припуск 0.4 мм, подача 0.2 мм/об, резец T0101
+    - type: threading
+      description: Нарезание метрической резьбы М40х1.5 длиной 18 мм резцом T0404, цикл G76, 650 об/мин

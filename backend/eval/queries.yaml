@@ -1,0 +1,151 @@
+# Запросы для оценки поиска (python -m eval.run_search).
+# expected — заголовок программы (или список допустимых), операция которой должна найтись;
+# null — подходящей операции в базе нет, правильный ответ «источника нет».
+# Поиск идёт с фильтром по типу станка, типу операции и диалекту станка запроса.
+
+# --- Fanuc ---
+- id: facing-fanuc-close
+  machine: Токарный станок с ЧПУ Fanuc 0i-TD
+  op_type: facing
+  description: Подрезка торца заготовки диаметром 84 мм в размер Z0 проходным резцом T0101, постоянная скорость резания 130 м/мин, подача 0.15 мм/об
+  expected: [Вал ступенчатый с резьбой (Fanuc), Втулка с центральным отверстием (Fanuc)]
+
+- id: facing-fanuc-para
+  machine: Токарный станок с ЧПУ Fanuc 0i-TD
+  op_type: facing
+  description: Торцевание заготовки Ø60, резец T0101, подача 0.15, скорость 120 м/мин
+  expected: [Вал ступенчатый с резьбой (Fanuc), Втулка с центральным отверстием (Fanuc)]
+
+- id: facing-fanuc-aluminium
+  machine: Токарный станок с ЧПУ Fanuc 0i-TD
+  op_type: facing
+  description: Подрезка торца алюминиевой заготовки диаметром 50 мм резцом T0101, скорость резания 250 м/мин
+  expected: [Вал ступенчатый с резьбой (Fanuc), Втулка с центральным отверстием (Fanuc)]
+
+- id: turning-fanuc-close
+  machine: Токарный станок с ЧПУ Fanuc 0i-TD
+  op_type: turning
+  description: Черновое продольное точение наружного контура ступенчатого вала циклом G71, глубина резания 2 мм, припуск 0.5 мм, подача 0.15 мм/об, резец T0101
+  expected: Вал ступенчатый с резьбой (Fanuc)
+
+- id: turning-fanuc-para
+  machine: Токарный станок с ЧПУ Fanuc 0i-TD
+  op_type: turning
+  description: Проточить вал по ступеням, черновой проход, глубина за проход 2 мм, снять с диаметра 82
+  expected: Вал ступенчатый с резьбой (Fanuc)
+
+- id: threading-fanuc-close
+  machine: Токарный станок с ЧПУ Fanuc 0i-TD
+  op_type: threading
+  description: Нарезание наружной метрической резьбы М45х1.5 длиной 26 мм резьбовым резцом T0404, многопроходный цикл G76, частота вращения 750 об/мин
+  expected: Вал ступенчатый с резьбой (Fanuc)
+
+- id: threading-fanuc-para
+  machine: Токарный станок с ЧПУ Fanuc 0i-TD
+  op_type: threading
+  description: Нарезать метрическую резьбу М30 с шагом 1.5 на валу, резьбовой резец, 700 оборотов
+  expected: Вал ступенчатый с резьбой (Fanuc)
+
+- id: drilling-fanuc-close
+  machine: Токарный станок с ЧПУ Fanuc 0i-TD
+  op_type: drilling
+  description: Сверление центрального отверстия диаметром 20 мм на глубину 42 мм сверлом T1111, цикл глубокого сверления G83, 600 об/мин
+  expected: Втулка с центральным отверстием (Fanuc)
+
+- id: drilling-fanuc-para
+  machine: Токарный станок с ЧПУ Fanuc 0i-TD
+  op_type: drilling
+  description: Просверлить сквозное отверстие Ø20 в заготовке втулки, сверло в позиции 11, с периодическим выводом сверла
+  expected: Втулка с центральным отверстием (Fanuc)
+
+# --- Sinumerik ---
+- id: facing-sinumerik-close
+  machine: Токарный станок с ЧПУ Sinumerik 802D
+  op_type: facing
+  description: Подрезка торца заготовки диаметром 76 мм в размер Z0 проходным резцом T1, постоянная скорость резания 110 м/мин, подача 0.15 мм/об
+  expected: Втулка с наружным контуром (Sinumerik)
+
+- id: facing-sinumerik-aluminium
+  machine: Токарный станок с ЧПУ Sinumerik 802D
+  op_type: facing
+  description: Подрезка торца алюминиевой заготовки диаметром 52 мм проходным резцом T1, скорость резания 250 м/мин, подача 0.2 мм/об
+  expected: Вал гладкий алюминиевый (Sinumerik)
+
+- id: facing-sinumerik-aluminium-para
+  machine: Токарный станок с ЧПУ Sinumerik 802D
+  op_type: facing
+  description: Торцевание алюминиевой заготовки Ø52, скорость 250, подача 0.2
+  expected: Вал гладкий алюминиевый (Sinumerik)
+
+- id: turning-sinumerik-contour
+  machine: Токарный станок с ЧПУ Sinumerik 802D
+  op_type: turning
+  description: Черновое наружное точение контура циклом CYCLE95 по подпрограмме контура, глубина резания 2 мм, припуск 0.5 мм, подача 0.15 мм/об
+  expected: Втулка с наружным контуром (Sinumerik)
+
+- id: turning-sinumerik-contour-para
+  machine: Токарный станок с ЧПУ Sinumerik 802D
+  op_type: turning
+  description: Обработать наружный контур втулки по подпрограмме, черновой цикл, съём 2 мм за проход
+  expected: Втулка с наружным контуром (Sinumerik)
+
+- id: turning-sinumerik-simple
+  machine: Токарный станок с ЧПУ Sinumerik 802D
+  op_type: turning
+  description: Наружное продольное точение гладкого вала простыми проходами без цикла с диаметра 50 до 46 мм на длине 40 мм, чистовой резец T2
+  expected: Вал гладкий алюминиевый (Sinumerik)
+
+- id: turning-sinumerik-simple-para
+  machine: Токарный станок с ЧПУ Sinumerik 802D
+  op_type: turning
+  description: Проточить гладкий вал в размер 46, длина 40, обычными проходами, без циклов
+  expected: Вал гладкий алюминиевый (Sinumerik)
+
+- id: drilling-sinumerik-close
+  machine: Токарный станок с ЧПУ Sinumerik 802D
+  op_type: drilling
+  description: Сверление центрального отверстия диаметром 20 мм на глубину 32 мм сверлом T5, цикл CYCLE82, частота вращения 400 об/мин
+  expected: Втулка с наружным контуром (Sinumerik)
+
+- id: drilling-sinumerik-para
+  machine: Токарный станок с ЧПУ Sinumerik 802D
+  op_type: drilling
+  description: Просверлить отверстие Ø20 на 32 мм, сверло в позиции 5, 400 оборотов
+  expected: Втулка с наружным контуром (Sinumerik)
+
+# --- Операции, которых в базе нет ---
+- id: threading-sinumerik-absent
+  machine: Токарный станок с ЧПУ Sinumerik 802D
+  op_type: threading
+  description: Нарезание наружной метрической резьбы М30х1.5 длиной 20 мм резьбовым резцом T3, 700 об/мин
+  expected: null   # на Sinumerik резьбы в базе нет, на Fanuc есть, но диалект другой
+
+- id: turning-fanuc-fillet
+  machine: Токарный станок с ЧПУ Fanuc 0i-TD
+  op_type: turning
+  description: Проточить галтель радиусом 3 мм фасонным резцом T0202
+  expected: null
+
+- id: turning-fanuc-bore
+  machine: Токарный станок с ЧПУ Fanuc 0i-TD
+  op_type: turning
+  description: Чистовая внутренняя расточка отверстия диаметром 40 мм на глубину 25 мм расточным резцом
+  expected: null
+
+- id: threading-fanuc-tap
+  machine: Токарный станок с ЧПУ Fanuc 0i-TD
+  op_type: threading
+  description: Нарезание внутренней резьбы М8 метчиком в торце детали, цикл G84
+  expected: null
+
+- id: drilling-sinumerik-gun
+  machine: Токарный станок с ЧПУ Sinumerik 802D
+  op_type: drilling
+  description: Глубокое сверление отверстия диаметром 3 мм на глубину 100 мм пушечным сверлом с подачей СОЖ через сверло
+  expected: null
+
+- id: facing-sinumerik-groove
+  machine: Токарный станок с ЧПУ Sinumerik 802D
+  op_type: facing
+  description: Торцевая прорезка канавки шириной 4 мм и глубиной 5 мм канавочным резцом
+  expected: null
