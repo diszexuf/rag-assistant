@@ -10,3 +10,5 @@ dist/
 
 # Результаты оценки
 backend/eval/results/
+
+*.log
