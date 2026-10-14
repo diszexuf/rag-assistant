@@ -15,6 +15,16 @@ services:
       timeout: 3s
       retries: 20
 
+  # Эмбеддинги BAAI/bge-m3 (1024 измерения). Модель (~2.3 ГБ) скачивается при первом запуске
+  # в том hf_cache. Бэкенд обращается к сервису, только если EMBEDDING_PROVIDER=tei.
+  embeddings:
+    image: ghcr.io/huggingface/text-embeddings-inference:cpu-1.9
+    command: --model-id BAAI/bge-m3
+    ports:
+      - "8081:80"
+    volumes:
+      - hf_cache:/data
+
   backend:
     build: ./backend
     env_file: .env
@@ -29,3 +39,4 @@ services:
 
 volumes:
   pgdata:
+  hf_cache:

@@ -4,6 +4,7 @@ from app.config import get_settings
 from app.llm.base import ChatModel, EmbeddingModel
 from app.llm.gigachat import GigaChatClient
 from app.llm.mock import DemoChatModel, HashEmbeddingModel
+from app.llm.tei import TEIEmbeddingModel
 
 
 @lru_cache
@@ -20,6 +21,14 @@ def _gigachat() -> GigaChatClient:
     )
 
 
+@lru_cache
+def _tei_embeddings() -> TEIEmbeddingModel:
+    settings = get_settings()
+    return TEIEmbeddingModel(
+        settings.embeddings_url, settings.embeddings_timeout_s, dim=settings.embedding_dim
+    )
+
+
 def get_chat_model() -> ChatModel:
     if get_settings().llm_provider == "gigachat":
         return _gigachat()
@@ -30,4 +39,6 @@ def get_embedding_model() -> EmbeddingModel:
     settings = get_settings()
     if settings.embedding_provider == "gigachat":
         return _gigachat()
+    if settings.embedding_provider == "tei":
+        return _tei_embeddings()
     return HashEmbeddingModel(settings.embedding_dim)

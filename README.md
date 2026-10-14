@@ -41,6 +41,45 @@ cd frontend && npm install && npm run dev
 
 Откроется на http://localhost:5173.
 
+## Загрузка своих программ
+
+Готовая УП (текстовый файл) режется на операции автоматически. Результат — черновик, который проверяет человек:
+
+```bash
+docker compose exec backend python -m seed.ingest seed/incoming/prog.nc --machine "Токарный станок с ЧПУ Fanuc 0i-TD" --material steel
+```
+
+Скрипт определяет границы операций (по вызову инструмента), их тип (по циклам и перемещениям), описывает каждую операцию и записывает `backend/seed/programs/drafts/prog.yaml` в формате `seed/programs/*.yaml`. Описания пишет модель (`LLM_PROVIDER=gigachat`) или шаблон по признакам кода (`--describe template`, по умолчанию при `LLM_PROVIDER=mock`). Если тип операции не определился, он указывается флагом `--types facing,turning,...`.
+
+Проверьте в черновике типы, границы и описания, перенесите файл в `backend/seed/programs/` и загрузите в базу: `python -m seed.seed`.
+
+## Оценка качества
+
+```bash
+docker compose exec backend python -m eval.run_search
+docker compose exec backend python -m eval.run_generation --repeats 3
+```
+
+Результаты и их разбор — в [docs/EVAL.md](docs/EVAL.md).
+
+## Эмбеддинги bge-m3
+
+По умолчанию поиск работает на заглушке (хеши слов). Смысловой поиск — модель `BAAI/bge-m3` в контейнере `embeddings` (Text Embeddings Inference, CPU, ~3 ГБ памяти; модель ~2,3 ГБ скачивается при первом запуске):
+
+```bash
+docker compose up -d embeddings
+```
+
+В `.env`: `EMBEDDING_PROVIDER=tei`. Затем перезапустите бэкенд, перезагрузите базу знаний и подберите порог поиска:
+
+```bash
+docker compose exec backend python -m app.llm.check_embeddings
+docker compose exec backend python -m seed.seed --reset
+docker compose exec backend python -m eval.run_search
+```
+
+Рекомендуемое значение порога из вывода `eval.run_search` впишите в `SEARCH_MAX_DISTANCE`.
+
 ## Тесты
 
 ```bash

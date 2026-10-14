@@ -11,7 +11,10 @@ class Settings(BaseSettings):
 
     llm_provider: Literal["mock", "gigachat"] = "mock"
     # Эмбеддинги выбираются отдельно: у GigaChat они оплачиваются отдельным пакетом
-    embedding_provider: Literal["mock", "gigachat"] = "mock"
+    # tei — локальная модель bge-m3 в контейнере Text Embeddings Inference
+    embedding_provider: Literal["mock", "gigachat", "tei"] = "mock"
+    embeddings_url: str = "http://embeddings:80"
+    embeddings_timeout_s: float = 30
     gigachat_auth_key: str = ""
     gigachat_scope: str = "GIGACHAT_API_PERS"
     gigachat_model: str = "GigaChat"
