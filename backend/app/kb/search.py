@@ -1,3 +1,5 @@
+import logging
+import time
 from dataclasses import dataclass, replace
 
 from sqlalchemy import select
@@ -7,6 +9,8 @@ from sqlalchemy.orm import contains_eager
 from app.kb.ingest import embedding_text
 from app.kb.models import Machine, Operation, Program
 from app.llm.base import EmbeddingModel, Reranker
+
+logger = logging.getLogger("kb.search")
 
 
 @dataclass(frozen=True)
@@ -60,7 +64,9 @@ async def search_operations(
     `candidates` ближайших без отсечения по расстоянию, их переоценивает cross-encoder,
     а релевантность определяет min_score.
     """
+    started = time.monotonic()
     vector = (await embedder.embed([query]))[0]
+    embed_s = time.monotonic() - started
     distance = Operation.embedding.cosine_distance(vector).label("distance")
     statement = (
         select(Operation, distance)
@@ -98,10 +104,35 @@ async def search_operations(
                 distance=float(dist),
             )
         )
+    scope = "диалект=%s" % (filters.dialect or "не %s" % filters.exclude_dialect)
+    if filters.material:
+        scope += ", материал=%s" % filters.material
     if reranker is None or not hits:
+        logger.info(
+            "Поиск [%s, %s]: эмбеддинг запроса %.2f с; кандидатов в пределах порога %s: %s",
+            filters.op_type,
+            scope,
+            embed_s,
+            max_distance,
+            ", ".join(f"«{h.program_title}» {h.distance:.3f}" for h in hits) or "нет",
+        )
         return hits
 
     # Код фрагмента помогает отличать циклы и режимы, которых нет в описании
     texts = [f"{embedding_text(h.op_type, h.description)}\n{h.fragment}" for h in hits]
+    started = time.monotonic()
     scores = await reranker.rerank(query, texts)
-    return apply_rerank(hits, scores, min_score, top_k)
+    result = apply_rerank(hits, scores, min_score, top_k)
+    logger.info(
+        "Поиск [%s, %s]: эмбеддинг %.2f с, реранкер %.2f с; кандидатов %s, оценки: %s; "
+        "прошли порог %s: %s",
+        filters.op_type,
+        scope,
+        embed_s,
+        time.monotonic() - started,
+        len(hits),
+        ", ".join(f"«{h.program_title}» {score:.3f}" for h, score in zip(hits, scores)),
+        min_score,
+        len(result),
+    )
+    return result

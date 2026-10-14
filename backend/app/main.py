@@ -9,9 +9,11 @@ from app.chat.api import router as chat_router
 from app.config import get_settings
 from app.db import SessionLocal, get_session
 from app.llm.factory import get_chat_model, get_embedding_model, get_reranker
+from app.logging_setup import setup_logging
 from app.orchestrator.runs import RunManager
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+setup_logging(get_settings().log_level)
+logger = logging.getLogger("app")
 
 
 @asynccontextmanager
@@ -28,6 +30,22 @@ async def lifespan(app: FastAPI):
         search_max_distance=settings.search_max_distance,
         search_candidates=settings.search_candidates,
         rerank_min_score=settings.rerank_min_score,
+    )
+    logger.info(
+        "Запуск сервера: LLM=%s (модель %s), эмбеддинги=%s, реранкер=%s; поиск: top_k=%s, "
+        "порог расстояния=%s, кандидатов=%s, мин. оценка реранкера=%s; "
+        "исправлений до %s, таймаут запуска %s с, уровень логов %s",
+        settings.llm_provider,
+        settings.gigachat_model if settings.llm_provider == "gigachat" else "-",
+        settings.embedding_provider,
+        settings.reranker_provider,
+        settings.search_top_k,
+        settings.search_max_distance,
+        settings.search_candidates,
+        settings.rerank_min_score,
+        settings.max_fix_attempts,
+        settings.run_timeout_s,
+        settings.log_level,
     )
     await app.state.runs.fail_stale_runs()
     yield

@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import time
 from collections.abc import AsyncIterator, Callable
 from datetime import datetime, timezone
 
@@ -11,6 +12,7 @@ from app.kb.models import Machine, Program
 from app.kb.refs import OP_TYPES
 from app.kb.search import SearchFilters, search_operations
 from app.llm.base import ChatModel, EmbeddingModel, LLMError, Reranker
+from app.logging_setup import run_id_var
 from app.orchestrator.pipeline import (
     GenerationError,
     MachineContext,
@@ -55,11 +57,20 @@ class RunManager:
         self._max_distance = search_max_distance
         self._subscribers: dict[int, set[asyncio.Queue]] = {}
         self._tasks: dict[int, asyncio.Task] = {}
+        # Момент начала запуска: для длительности стадий и общего времени в логах
+        self._started: dict[int, float] = {}
 
     async def start(self, session: AsyncSession, chat: Chat, message: Message) -> GenerationRun:
         run = GenerationRun(chat_id=chat.id, message_id=message.id, stage="queued")
         session.add(run)
         await session.commit()
+        logger.info(
+            "Запуск %s создан: чат %s, сообщение %s, режим %s",
+            run.id,
+            chat.id,
+            message.id,
+            "правка программы %s" % message.program_id if message.program_id else "новая программа",
+        )
         task = asyncio.create_task(self._execute(run.id))
         self._tasks[run.id] = task
         task.add_done_callback(lambda _: self._tasks.pop(run.id, None))
@@ -108,6 +119,14 @@ class RunManager:
             queue.put_nowait(state)
 
     async def _update(self, run_id: int, **values) -> None:
+        if "stage" in values:
+            elapsed = time.monotonic() - self._started.get(run_id, time.monotonic())
+            logger.info(
+                "Стадия: %s%s (прошло %.1f с)",
+                values["stage"],
+                f", попытка {values['attempt']}" if values.get("attempt") else "",
+                elapsed,
+            )
         async with self._sessions() as session:
             run = await session.get(GenerationRun, run_id)
             for name, value in values.items():
@@ -116,6 +135,9 @@ class RunManager:
             await self._publish(run.state())
 
     async def _execute(self, run_id: int) -> None:
+        run_id_var.set(str(run_id))
+        self._started[run_id] = time.monotonic()
+        logger.info("Запуск начат")
         progress = RunProgress()
         try:
             async with asyncio.timeout(self._run_timeout_s):
@@ -123,14 +145,34 @@ class RunManager:
             error = None
         except TimeoutError:
             error = f"Генерация не уложилась в {self._run_timeout_s:g} с"
+            logger.error("Таймаут запуска (%s с)", f"{self._run_timeout_s:g}")
         except (LLMError, GenerationError) as exc:
             error = str(exc)
+            logger.error("Запуск прерван: %s", exc)
         except Exception as exc:  # запуск не должен остаться в активной стадии
-            logger.exception("run %s failed", run_id)
+            logger.exception("Необработанная ошибка запуска")
             error = f"Внутренняя ошибка: {exc}"
 
         try:
             program_id = await self._save_result(run_id, progress, failed=error is not None)
+            elapsed = time.monotonic() - self._started.get(run_id, time.monotonic())
+            if error:
+                logger.warning(
+                    "Запуск завершён с ошибкой за %.1f с: %s. Черновик сохранён: %s",
+                    elapsed,
+                    error,
+                    f"программа {program_id}" if program_id else "нет",
+                )
+            else:
+                logger.info(
+                    "Запуск завершён успешно за %.1f с: программа %s, источников %s, "
+                    "попыток исправления %s, ошибок %s",
+                    elapsed,
+                    program_id,
+                    len(progress.sources),
+                    progress.attempts,
+                    len(progress.report.errors) if progress.report else "?",
+                )
             await self._update(
                 run_id,
                 stage="failed" if error else "done",
@@ -138,8 +180,9 @@ class RunManager:
                 program_id=program_id,
                 finished_at=datetime.now(timezone.utc),
             )
+            self._started.pop(run_id, None)
         except Exception:
-            logger.exception("run %s: could not save result", run_id)
+            logger.exception("Не удалось сохранить результат запуска")
             await self._update(run_id, stage="failed", error="Не удалось сохранить результат")
 
     async def _generate(self, run_id: int, progress: RunProgress) -> None:

@@ -40,6 +40,9 @@ class Settings(BaseSettings):
     llm_timeout_s: float = 90
     run_timeout_s: float = 280
 
+    # INFO — ход работы; DEBUG — ещё и полные тексты запросов к модели и её ответов
+    log_level: str = "INFO"
+
 
 @lru_cache
 def get_settings() -> Settings:

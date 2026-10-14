@@ -1,4 +1,5 @@
 import json
+import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
@@ -16,6 +17,7 @@ from app.orchestrator.params import missing_value_issues
 from app.orchestrator.runs import RunManager, active_run
 
 router = APIRouter(prefix="/api")
+logger = logging.getLogger("api")
 
 DEFAULT_LOGIN = "technologist"
 
@@ -121,6 +123,9 @@ async def create_chat(
     chat = Chat(user_id=user.id, title=title[:200], machine_id=machine.id, material=body.material)
     session.add(chat)
     await session.commit()
+    logger.info(
+        "Создан чат %s: станок «%s», материал %s", chat.id, machine.name, body.material
+    )
     return _chat(chat)
 
 
@@ -179,6 +184,7 @@ async def delete_chat(
         raise HTTPException(409, "В чате идёт генерация")
     await session.delete(chat)
     await session.commit()
+    logger.info("Удалён чат %s", chat_id)
 
 
 @router.post("/chats/{chat_id}/requests", status_code=202)
@@ -216,6 +222,13 @@ async def create_request(
     )
     session.add(message)
     await session.flush()
+    logger.info(
+        "Запрос в чате %s: %s, операций %s%s",
+        chat.id,
+        "правка программы %s" % body.base_program_id if body.base_program_id else "новая программа",
+        len(operations),
+        f", инструкция: {instruction[:120]}" if instruction else "",
+    )
     run = await runs.start(session, chat, message)
     return run.state()
 
@@ -303,4 +316,11 @@ async def save_version(
     program.text = body.text
     session.add(version)
     await session.commit()
+    logger.info(
+        "Ручная правка программы %s: версия %s, ошибок %s, предупреждений %s",
+        program.id,
+        version.id,
+        len(report.errors),
+        len(report.issues) - len(report.errors),
+    )
     return _version(version)

@@ -1,4 +1,6 @@
+import logging
 import re
+import time
 from collections.abc import Awaitable, Callable, Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -11,6 +13,8 @@ from app.kb.search import OperationHit, SearchFilters
 from app.llm.base import ChatMessage, ChatModel
 from app.nc import ConversionResult, MachineInfo, ValidationReport
 from app.orchestrator.params import missing_value_issues
+
+logger = logging.getLogger("pipeline")
 
 PROMPTS_DIR = Path(__file__).parent / "prompts"
 _FENCE = re.compile(r"```[a-zA-Z]*\n(.*?)```", re.DOTALL)
@@ -160,15 +164,27 @@ class Pipeline:
     ) -> GenerationResult:
         progress = progress if progress is not None else RunProgress()
         progress.operations = [(o.op_type, o.description) for o in operations]
+        logger.info(
+            "Новая программа: станок «%s», диалект %s, материал %s, операций %s",
+            machine.name,
+            machine.dialect,
+            material,
+            len(operations),
+        )
+        for index, operation in enumerate(operations, start=1):
+            logger.info("  операция %s [%s]: %s", index, operation.op_type, _short(operation.description))
 
         await on_stage("searching", 0)
         for index, operation in enumerate(operations, start=1):
             source = await self._resolve_source(index, operation, machine, material, on_stage)
             progress.sources.append(source)
+        _log_sources(progress.sources)
 
         await on_stage("generating", 0)
         prompt = self._generation_prompt(machine, material, progress.sources)
-        program, progress.explanation = await self._ask_program(prompt, machine.dialect, required=True)
+        program, progress.explanation = await self._ask_program(
+            prompt, machine.dialect, required=True, purpose="генерация"
+        )
         progress.program_text = program
 
         return await self._validate_and_fix(machine, program, progress, on_stage)
@@ -191,6 +207,23 @@ class Pipeline:
         if instruction.strip():
             # Пустой тип — свободная инструкция: из неё проверяются только общие значения
             progress.operations.append(("", instruction))
+        logger.info(
+            "Правка программы: станок «%s», диалект %s, материал %s, строк в программе %s, "
+            "новых операций %s",
+            machine.name,
+            machine.dialect,
+            material,
+            len(base_program.splitlines()),
+            len(operations),
+        )
+        logger.info("  инструкция: %s", _short(instruction) if instruction.strip() else "(нет)")
+        for offset, operation in enumerate(operations):
+            logger.info(
+                "  новая операция %s [%s]: %s",
+                first_index + offset,
+                operation.op_type,
+                _short(operation.description),
+            )
 
         if operations:
             await on_stage("searching", 0)
@@ -199,10 +232,13 @@ class Pipeline:
                     first_index + offset, operation, machine, material, on_stage
                 )
                 progress.sources.append(source)
+            _log_sources(progress.sources)
 
         await on_stage("editing", 0)
         prompt = self._edit_prompt(machine, material, base_program, instruction, progress.sources)
-        program, progress.explanation = await self._ask_program(prompt, machine.dialect, required=True)
+        program, progress.explanation = await self._ask_program(
+            prompt, machine.dialect, required=True, purpose="правка"
+        )
         progress.program_text = program
         return await self._validate_and_fix(machine, program, progress, on_stage)
 
@@ -212,22 +248,59 @@ class Pipeline:
         await on_stage("validating", 0)
         report = self._check(machine, program, progress)
         progress.report = report
+        _log_report(report, "Проверка программы")
 
         while report.errors and progress.attempts < self._max_fix_attempts:
             progress.attempts += 1
+            logger.info(
+                "Исправление, попытка %s из %s: ошибок %s",
+                progress.attempts,
+                self._max_fix_attempts,
+                len(report.errors),
+            )
             await on_stage("fixing", progress.attempts)
-            answer = await self._ask_program(self._fix_prompt(machine, program, report), machine.dialect)
+            answer = await self._ask_program(
+                self._fix_prompt(machine, program, report),
+                machine.dialect,
+                purpose=f"исправление {progress.attempts}",
+            )
             if answer is None:
+                logger.warning("Исправление: в ответе нет программы, остаётся предыдущий вариант")
                 break
             candidate, explanation = answer
             await on_stage("validating", progress.attempts)
             candidate_report = self._check(machine, candidate, progress)
+            _log_report(candidate_report, f"Проверка после исправления {progress.attempts}")
             # Досрочная остановка: попытка не уменьшила число ошибок
             if len(candidate_report.errors) >= len(report.errors):
+                logger.info(
+                    "Исправление не помогло (ошибок %s -> %s): цикл остановлен, остаётся "
+                    "предыдущий вариант",
+                    len(report.errors),
+                    len(candidate_report.errors),
+                )
                 break
+            logger.info(
+                "Исправление принято: ошибок %s -> %s", len(report.errors), len(candidate_report.errors)
+            )
             program, report = candidate, candidate_report
             progress.program_text, progress.report = program, report
             progress.explanation = explanation or progress.explanation
+
+        if report.errors:
+            logger.warning(
+                "Итог: программа отдаётся с ошибками (%s), попыток исправления %s из %s",
+                len(report.errors),
+                progress.attempts,
+                self._max_fix_attempts,
+            )
+        else:
+            logger.info(
+                "Итог: программа без ошибок, строк %s, предупреждений %s, попыток исправления %s",
+                len(program.splitlines()),
+                len(report.issues),
+                progress.attempts,
+            )
 
         return GenerationResult(
             program_text=program,
@@ -265,17 +338,29 @@ class Pipeline:
         def base(**kwargs) -> SearchFilters:
             return SearchFilters(machine_kind=machine.kind, op_type=operation.op_type, **kwargs)
 
-        # Ослабление фильтра: сначала снимается материал, затем диалект
-        for filters in (base(dialect=machine.dialect, material=material), base(dialect=machine.dialect)):
-            hits = await self._search(query, filters)
-            if hits:
-                return _with_hit(source, hits[0], "kb", hits[0].fragment)
+        title = OP_TYPES.get(operation.op_type, operation.op_type)
+        label = f"операция {index} ({title})"
 
-        for filters in (
-            base(exclude_dialect=machine.dialect, material=material),
-            base(exclude_dialect=machine.dialect),
-        ):
+        # Ослабление фильтра: сначала снимается материал, затем диалект
+        same_dialect = (
+            ("тот же диалект и материал", base(dialect=machine.dialect, material=material)),
+            ("тот же диалект, любой материал", base(dialect=machine.dialect)),
+        )
+        for number, (name, filters) in enumerate(same_dialect, start=1):
             hits = await self._search(query, filters)
+            logger.info("Поиск %s, попытка %s [%s]: найдено %s", label, number, name, len(hits))
+            if hits:
+                _with_hit(source, hits[0], "kb", hits[0].fragment)
+                logger.info("  источник из базы знаний: %s", _describe_source(source))
+                return source
+
+        other_dialect = (
+            ("другой диалект, тот же материал", base(exclude_dialect=machine.dialect, material=material)),
+            ("другой диалект, любой материал", base(exclude_dialect=machine.dialect)),
+        )
+        for number, (name, filters) in enumerate(other_dialect, start=3):
+            hits = await self._search(query, filters)
+            logger.info("Поиск %s, попытка %s [%s]: найдено %s", label, number, name, len(hits))
             if not hits:
                 continue
             hit = hits[0]
@@ -287,21 +372,55 @@ class Pipeline:
                     f"Найдена похожая операция на диалекте {hit.dialect} "
                     f"(«{hit.program_title}»), но перевести её не удалось: {'; '.join(reasons)}"
                 )
+                logger.info(
+                    "  найдена на диалекте %s («%s»), конвертация не удалась (%s): источника нет",
+                    hit.dialect,
+                    hit.program_title,
+                    "; ".join(reasons),
+                )
                 return source
-            return _with_hit(source, hit, "converted", result.text)
+            _with_hit(source, hit, "converted", result.text)
+            logger.info("  источник конвертирован с диалекта %s: %s", hit.dialect, _describe_source(source))
+            return source
 
         source.note = "В базе знаний нет похожих операций"
+        logger.info("  источника нет: %s", source.note)
         return source
 
     async def _ask_program(
-        self, prompt: str, dialect: str, required: bool = False
+        self, prompt: str, dialect: str, required: bool = False, purpose: str = "запрос"
     ) -> tuple[str, str] | None:
+        logger.info(
+            "Запрос к модели (%s): system %s симв., запрос %s симв.",
+            purpose,
+            len(self._system),
+            len(prompt),
+        )
+        logger.debug("Запрос к модели (%s), system:\n%s", purpose, self._system)
+        logger.debug("Запрос к модели (%s), user:\n%s", purpose, prompt)
+
+        started = time.monotonic()
         response = await self._chat.complete(
             [ChatMessage("system", self._system), ChatMessage("user", prompt)]
         )
+        logger.info(
+            "Ответ модели (%s): %s симв., %.1f с", purpose, len(response), time.monotonic() - started
+        )
+        logger.debug("Ответ модели (%s):\n%s", purpose, response)
+
         answer = extract_program(response)
-        if answer:
+        if answer is None:
+            logger.warning("В ответе модели нет блока с программой")
+        else:
+            raw_lines = len(answer[0].splitlines())
             program = strip_comments(answer[0], dialect)
+            logger.info(
+                "Разбор ответа: программа %s строк, после удаления комментариев и пустых строк %s; "
+                "пояснение: %s",
+                raw_lines,
+                len(program.splitlines()),
+                _short(answer[1]) if answer[1] else "(нет)",
+            )
             answer = (program, answer[1]) if program else None
         if answer is None and required:
             raise GenerationError("Модель не вернула текст программы")
@@ -352,6 +471,45 @@ class Pipeline:
             **_machine_fields(machine),
             report="\n".join(lines),
             program=program,
+        )
+
+
+def _short(text: str, limit: int = 160) -> str:
+    text = " ".join(text.split())
+    return text if len(text) <= limit else text[: limit - 1] + "…"
+
+
+def _describe_source(source: OperationSource) -> str:
+    measure = (
+        f"релевантность {source.score}"
+        if source.score is not None
+        else f"расстояние {source.distance}"
+    )
+    return f"«{source.program_title}» (операция {source.operation_id}, {source.src_dialect}, {measure})"
+
+
+def _log_sources(sources: list[OperationSource]) -> None:
+    kinds = {"kb": 0, "converted": 0, "unknown": 0}
+    for source in sources:
+        kinds[source.kind] += 1
+    logger.info(
+        "Источники: из базы знаний %s, конвертировано %s, без источника %s",
+        kinds["kb"],
+        kinds["converted"],
+        kinds["unknown"],
+    )
+
+
+def _log_report(report: ValidationReport, title: str) -> None:
+    warnings = [i for i in report.issues if i.severity != "error"]
+    logger.info("%s: ошибок %s, предупреждений %s", title, len(report.errors), len(warnings))
+    for issue in report.issues:
+        logger.info(
+            "  %s %s%s: %s",
+            "ошибка" if issue.severity == "error" else "предупреждение",
+            issue.code,
+            f" (строка {issue.line})" if issue.line else "",
+            issue.message,
         )
 
 
