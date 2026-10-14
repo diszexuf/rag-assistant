@@ -10,7 +10,7 @@ from app.chat.models import ACTIVE_STAGES, Chat, GenerationRun, Message, Program
 from app.kb.models import Machine, Program
 from app.kb.refs import OP_TYPES
 from app.kb.search import SearchFilters, search_operations
-from app.llm.base import ChatModel, EmbeddingModel, LLMError
+from app.llm.base import ChatModel, EmbeddingModel, LLMError, Reranker
 from app.orchestrator.pipeline import (
     GenerationError,
     MachineContext,
@@ -34,15 +34,21 @@ class RunManager:
         session_factory: async_sessionmaker[AsyncSession],
         chat_model: Callable[[], ChatModel],
         embedder: Callable[[], EmbeddingModel],
+        reranker: Callable[[], Reranker | None] = lambda: None,
         *,
         run_timeout_s: float,
         max_fix_attempts: int,
         search_top_k: int,
         search_max_distance: float,
+        search_candidates: int = 20,
+        rerank_min_score: float = 0.3,
     ):
         self._sessions = session_factory
         self._chat_model = chat_model
         self._embedder = embedder
+        self._reranker = reranker
+        self._candidates = search_candidates
+        self._min_score = rerank_min_score
         self._run_timeout_s = run_timeout_s
         self._max_fix_attempts = max_fix_attempts
         self._top_k = search_top_k
@@ -155,10 +161,19 @@ class RunManager:
                 OperationRequest(op["type"], op["description"]) for op in message.operations
             ]
             embedder = self._embedder()
+            reranker = self._reranker()
 
             async def search(query: str, filters: SearchFilters):
                 return await search_operations(
-                    session, embedder, query, filters, self._top_k, self._max_distance
+                    session,
+                    embedder,
+                    query,
+                    filters,
+                    self._top_k,
+                    self._max_distance,
+                    reranker=reranker,
+                    candidates=self._candidates,
+                    min_score=self._min_score,
                 )
 
             async def on_stage(stage: str, attempt: int) -> None:

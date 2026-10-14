@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.chat.api import router as chat_router
 from app.config import get_settings
 from app.db import SessionLocal, get_session
-from app.llm.factory import get_chat_model, get_embedding_model
+from app.llm.factory import get_chat_model, get_embedding_model, get_reranker
 from app.orchestrator.runs import RunManager
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -21,10 +21,13 @@ async def lifespan(app: FastAPI):
         SessionLocal,
         get_chat_model,
         get_embedding_model,
+        get_reranker,
         run_timeout_s=settings.run_timeout_s,
         max_fix_attempts=settings.max_fix_attempts,
         search_top_k=settings.search_top_k,
         search_max_distance=settings.search_max_distance,
+        search_candidates=settings.search_candidates,
+        rerank_min_score=settings.rerank_min_score,
     )
     await app.state.runs.fail_stale_runs()
     yield
@@ -43,6 +46,7 @@ async def health(session: AsyncSession = Depends(get_session)) -> dict:
         "status": "ok",
         "llm_provider": settings.llm_provider,
         "embedding_provider": settings.embedding_provider,
+        "reranker_provider": settings.reranker_provider,
     }
 
 

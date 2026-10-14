@@ -24,6 +24,15 @@ class Settings(BaseSettings):
 
     embedding_dim: int = 1024
 
+    # Реранкер поверх векторного поиска: none — без него; tei — bge-reranker-v2-m3
+    reranker_provider: Literal["none", "tei"] = "none"
+    reranker_url: str = "http://reranker:80"
+    reranker_timeout_s: float = 30
+    # Сколько кандидатов вытягивать из базы для переранжирования
+    search_candidates: int = 20
+    # Минимальная оценка реранкера, при которой операция считается релевантной
+    rerank_min_score: float = 0.3
+
     search_max_distance: float = 0.5
     search_top_k: int = 3
 

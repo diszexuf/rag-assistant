@@ -1,10 +1,10 @@
 from functools import lru_cache
 
 from app.config import get_settings
-from app.llm.base import ChatModel, EmbeddingModel
+from app.llm.base import ChatModel, EmbeddingModel, Reranker
 from app.llm.gigachat import GigaChatClient
 from app.llm.mock import DemoChatModel, HashEmbeddingModel
-from app.llm.tei import TEIEmbeddingModel
+from app.llm.tei import TEIEmbeddingModel, TEIReranker
 
 
 @lru_cache
@@ -42,3 +42,15 @@ def get_embedding_model() -> EmbeddingModel:
     if settings.embedding_provider == "tei":
         return _tei_embeddings()
     return HashEmbeddingModel(settings.embedding_dim)
+
+
+@lru_cache
+def _tei_reranker() -> TEIReranker:
+    settings = get_settings()
+    return TEIReranker(settings.reranker_url, settings.reranker_timeout_s)
+
+
+def get_reranker() -> Reranker | None:
+    if get_settings().reranker_provider == "tei":
+        return _tei_reranker()
+    return None

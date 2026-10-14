@@ -10,7 +10,7 @@ from app.config import get_settings
 from app.db import SessionLocal
 from app.kb.ingest import embedding_text
 from app.kb.search import SearchFilters, search_operations
-from app.llm.factory import get_embedding_model
+from app.llm.factory import get_embedding_model, get_reranker
 from eval.common import expected_titles, load_machines, load_yaml, save_result
 
 
@@ -57,10 +57,16 @@ def compute_metrics(rows: list[dict], threshold: float) -> dict:
     return metrics
 
 
-async def main(max_distance: float, top_k: int) -> None:
+async def main(max_distance: float, top_k: int, rerank: bool) -> None:
     settings = get_settings()
-    threshold = max_distance if max_distance >= 0 else settings.search_max_distance
     embedder = get_embedding_model()
+    reranker = get_reranker() if rerank else None
+    if rerank and reranker is None:
+        raise SystemExit("--rerank: задайте RERANKER_PROVIDER=tei и поднимите контейнер reranker")
+    # С реранкером «расстоянием» считается 1 - оценка, чтобы метрики и порог читались одинаково;
+    # RERANK_MIN_SCORE = 1 - порог
+    default_threshold = 1 - settings.rerank_min_score if reranker else settings.search_max_distance
+    threshold = max_distance if max_distance >= 0 else default_threshold
     rows: list[dict] = []
 
     async with SessionLocal() as session:
@@ -78,19 +84,29 @@ async def main(max_distance: float, top_k: int) -> None:
                 filters,
                 top_k,
                 2.0,
+                reranker=reranker,
+                candidates=settings.search_candidates,
+                min_score=0.0,
             )
             rows.append(
                 {
                     "id": item["id"],
                     "expected": expected_titles(item),
                     "hits": [
-                        {"title": h.program_title, "distance": round(h.distance, 4)} for h in hits
+                        {
+                            "title": h.program_title,
+                            "distance": round(1 - h.score if h.score is not None else h.distance, 4),
+                        }
+                        for h in hits
                     ],
                 }
             )
 
     metrics = compute_metrics(rows, threshold)
-    print(f"Провайдер эмбеддингов: {settings.embedding_provider}, порог: {threshold}")
+    mode = "bge-reranker" if reranker else "только векторный поиск"
+    print(f"Провайдер эмбеддингов: {settings.embedding_provider}, {mode}, порог: {threshold}")
+    if reranker:
+        print("Для реранкера «расстояние» = 1 - оценка; RERANK_MIN_SCORE = 1 - порог")
     print(f"{'id':36} {'ожидается':>10} {'ранг':>5} {'до ожидаемой':>13} {'до лучшей':>10}")
     for row in rows:
         titles = [h["title"] for h in row["hits"]]
@@ -110,7 +126,7 @@ async def main(max_distance: float, top_k: int) -> None:
 
     path = save_result(
         "search",
-        settings.embedding_provider,
+        settings.embedding_provider + ("-rerank" if reranker else ""),
         {"threshold": threshold, "metrics": metrics, "rows": rows},
     )
     print(f"Результат: {path}")
@@ -120,5 +136,8 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--max-distance", type=float, default=-1, help="по умолчанию SEARCH_MAX_DISTANCE")
     parser.add_argument("--top-k", type=int, default=5)
+    parser.add_argument(
+        "--rerank", action="store_true", help="переранжировать реранкером (RERANKER_PROVIDER=tei)"
+    )
     args = parser.parse_args()
-    asyncio.run(main(args.max_distance, args.top_k))
+    asyncio.run(main(args.max_distance, args.top_k, args.rerank))

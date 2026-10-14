@@ -14,7 +14,7 @@ from app.config import get_settings
 from app.db import SessionLocal
 from app.kb.search import SearchFilters, search_operations
 from app.llm.base import LLMError
-from app.llm.factory import get_chat_model, get_embedding_model
+from app.llm.factory import get_chat_model, get_embedding_model, get_reranker
 from app.orchestrator.pipeline import (
     GenerationError,
     MachineContext,
@@ -27,7 +27,15 @@ from eval.common import load_machines, load_yaml, save_result
 async def run_once(session, embedder, machine, material, operations, settings) -> dict:
     async def search(query: str, filters: SearchFilters):
         return await search_operations(
-            session, embedder, query, filters, settings.search_top_k, settings.search_max_distance
+            session,
+            embedder,
+            query,
+            filters,
+            settings.search_top_k,
+            settings.search_max_distance,
+            reranker=get_reranker(),
+            candidates=settings.search_candidates,
+            min_score=settings.rerank_min_score,
         )
 
     context = MachineContext(

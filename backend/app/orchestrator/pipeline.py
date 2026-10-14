@@ -64,6 +64,8 @@ class OperationSource:
     operation_id: int | None = None
     src_dialect: str | None = None
     distance: float | None = None
+    # Оценка реранкера 0..1, если он использовался
+    score: float | None = None
     note: str = ""
 
     def to_dict(self) -> dict:
@@ -363,6 +365,7 @@ def _with_hit(
     source.operation_id = hit.operation_id
     source.src_dialect = hit.dialect
     source.distance = round(hit.distance, 4)
+    source.score = round(hit.score, 4) if hit.score is not None else None
     return source
 
 

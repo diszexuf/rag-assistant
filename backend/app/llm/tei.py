@@ -64,3 +64,17 @@ class TEIEmbeddingModel(_TEIClient):
                 f"Размерность эмбеддингов {len(vectors[0])} не совпадает с EMBEDDING_DIM={self._dim}"
             )
         return vectors
+
+
+class TEIReranker(_TEIClient):
+    """Реранкер через TEI (cross-encoder). Реализует Reranker."""
+
+    async def rerank(self, query: str, texts: list[str]) -> list[float]:
+        if not texts:
+            return []
+        data = await self._post("/rerank", {"query": query, "texts": texts, "truncate": True})
+        try:
+            by_index = {int(item["index"]): float(item["score"]) for item in data}
+            return [by_index[i] for i in range(len(texts))]
+        except (KeyError, TypeError, ValueError) as exc:
+            raise LLMError(f"Неожиданный ответ реранкера: {str(data)[:200]}") from exc

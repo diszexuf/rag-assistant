@@ -94,7 +94,7 @@ watch(text, (value) => emit('draft', value), { immediate: true })
     <div v-for="source in program.sources" :key="source.index">
       {{ source.index }}. {{ opTypes[source.op_type] ?? source.op_type }} — {{ KINDS[source.kind] }}
       <template v-if="source.program_title">
-        : «{{ source.program_title }}», расстояние {{ source.distance }}
+        : «{{ source.program_title }}», {{ source.score !== null && source.score !== undefined ? `релевантность ${source.score}` : `расстояние ${source.distance}` }}
       </template>
       <br />
       <NText v-if="source.note" depth="3">{{ source.note }}</NText>

@@ -25,6 +25,15 @@ services:
     volumes:
       - hf_cache:/data
 
+  # Реранкер BAAI/bge-reranker-v2-m3 (~2.3 ГБ). Нужен, только если RERANKER_PROVIDER=tei.
+  reranker:
+    image: ghcr.io/huggingface/text-embeddings-inference:cpu-1.9
+    command: --model-id BAAI/bge-reranker-v2-m3
+    ports:
+      - "8082:80"
+    volumes:
+      - hf_cache:/data
+
   backend:
     build: ./backend
     env_file: .env

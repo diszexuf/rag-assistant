@@ -18,3 +18,11 @@ class ChatModel(Protocol):
 
 class EmbeddingModel(Protocol):
     async def embed(self, texts: list[str]) -> list[list[float]]: ...
+
+
+class Reranker(Protocol):
+    """Оценивает релевантность текстов запросу."""
+
+    async def rerank(self, query: str, texts: list[str]) -> list[float]:
+        """Оценки 0..1 в порядке texts: чем больше, тем релевантнее."""
+        ...

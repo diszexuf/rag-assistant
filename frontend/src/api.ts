@@ -86,6 +86,8 @@ export interface Source {
   program_title: string | null
   src_dialect: string | null
   distance: number | null
+  // Оценка реранкера 0..1, если он использовался
+  score: number | null
   note: string
 }
 
