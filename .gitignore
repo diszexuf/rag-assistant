@@ -1,14 +1,47 @@
+# --- Секреты и локальные настройки ---
 .env
+.env.*
+!.env.example
+*.key
+
+# --- Python ---
 __pycache__/
-*.pyc
-.pytest_cache/
+*.py[cod]
+*.egg-info/
+build/
 .venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# --- Node / фронтенд ---
 node_modules/
 dist/
-.idea/
-.vscode/
+.vite/
+*.tsbuildinfo
+npm-debug.log*
 
+# --- Данные проекта ---
 # Результаты оценки
 backend/eval/results/
+# Черновики разметки из seed.ingest: проверяются человеком и переносятся в seed/programs/
+backend/seed/programs/drafts/
+# Входящие УП для ингестии (могут быть программами предприятия)
+backend/seed/incoming/*
+!backend/seed/incoming/.gitkeep
 
+# --- Логи ---
 *.log
+
+# --- IDE и ОС ---
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db
+desktop.ini
+# Временные файлы Office при открытом документе
+~$*
